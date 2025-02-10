@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"fmt"
 	"net/http"
 
@@ -32,6 +33,52 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
 	// TODO: implement the upload here
+	const maxMemory = 10 << 20
+	// Store up to maxMemory bytes from that files
+	r.ParseMultipartForm(maxMemory);
 
-	respondWithJSON(w, http.StatusOK, struct{}{})
+	file, header, err := r.FormFile("thumbnail");
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err);
+		return
+	}
+	defer file.Close();
+
+	contentType := header.Header.Get("Content-Type");
+	data, err := io.ReadAll(file);
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to read from file", err);
+		return
+	}
+
+
+	video, err := cfg.db.GetVideo(videoID);
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to Get Video", err)
+		return
+	}
+
+	if video.UserID != userID {
+		respondWithError(w, http.StatusUnauthorized, "Unable to Authorize User", err)
+		return
+	}
+
+	th := thumbnail{
+		data: data,
+		mediaType: contentType,
+	}
+	
+	videoThumbnails[videoID] = th
+
+	url := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID)
+
+	video.ThumbnailURL = &url
+
+	if err = cfg.db.UpdateVideo(video); err != nil {
+		delete(videoThumbnails, videoID)
+		respondWithError(w, http.StatusUnauthorized, "Unable to Authorize User", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, video)
 }
