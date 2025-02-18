@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 
 	"github.com/joho/godotenv"
@@ -13,6 +16,7 @@ import (
 
 type apiConfig struct {
 	db               database.Client
+	s3Client 		 *s3.Client
 	jwtSecret        string
 	platform         string
 	filepathRoot     string
@@ -93,12 +97,19 @@ func main() {
 		log.Fatalf("Couldn't create assets directory: %v", err)
 	}
 
+	awsCfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Fatalf("Couldn't load AWS Config: %v", err)
+	}
+	awsClient := s3.NewFromConfig(awsCfg)
+	cfg.s3Client = awsClient
+
 	mux := http.NewServeMux()
 	appHandler := http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))
 	mux.Handle("/app/", appHandler)
 
 	assetsHandler := http.StripPrefix("/assets", http.FileServer(http.Dir(assetsRoot)))
-	mux.Handle("/assets/", cacheMiddleware(assetsHandler))
+	mux.Handle("/assets/", noCacheMiddleware(assetsHandler))
 
 	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
 	mux.HandleFunc("POST /api/refresh", cfg.handlerRefresh)
